@@ -1,0 +1,7 @@
+# This file contains configurations for the AI.
+
+# Hyperparameters for tuning the neural network.
+[hyperparameters]
+learning_rate = 1e-4
+discount = 1e-4
+brood_size = 5
