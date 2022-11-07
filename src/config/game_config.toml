@@ -25,7 +25,7 @@ game_name = "Flappy Bird"
 fps = 60.0                      # Default: 60.0
 
 # Speed of wich the bird is flying at.
-flying_speed = 4                # Default: 4
+flying_speed = 3                # Default: 3
 
 # How fast the bird is animating.
 animation_speed = 6             # Default: 6
@@ -52,7 +52,7 @@ rotation_factor = -5            # Default: -5
 obstacle_frequency = 1_500      # Default: 1_500
 
 # Gap between obstacles.
-obstacle_gap = 80               # Default: 80
+obstacle_gap = 90               # Default: 80
 
 ################
 ##   ASSETS   ##

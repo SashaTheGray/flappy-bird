@@ -42,7 +42,7 @@ DELAY: int = 10
 
 @final
 class Game:
-    """Crappy Bird game class."""
+    """Flappy Bird game class."""
 
     ########################
     ##   DUNDER METHODS   ##
@@ -75,11 +75,6 @@ class Game:
         # Set the player.
         self.__player: PlayerEnum = (
             PlayerEnum.HUMAN if ai_config is None else PlayerEnum.AI
-        )
-
-        # AI instance if AI is playing.
-        self.__ai: src.objects.ai.AI | None = ai_config or src.objects.ai.AI(
-            ai_config
         )
 
         # Game configurations.
