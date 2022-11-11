@@ -10,7 +10,6 @@ from __future__ import annotations
 import random
 
 # Local imports.
-import src.objects.ai
 import src.objects.bird
 import src.objects.intel_screen
 import src.objects.ground
