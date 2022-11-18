@@ -13,6 +13,7 @@ from __future__ import annotations
 
 # Local imports.
 import src.utils.functions as utils
+import src.objects.score_counter
 from src.utils.stenographer import Stenographer
 from src.enums import BirdStateEnum
 from src.utils.types import *
@@ -22,7 +23,9 @@ from src.utils.types import *
 if TYPE_CHECKING:
     from pygame import Surface, Rect
 
-LOGGER: Stenographer = Stenographer.create_logger()
+LOGGER: Stenographer = Stenographer.create_logger(
+    stream_handler_level=30
+)
 
 
 ###############
@@ -46,6 +49,7 @@ class Bird(pg.sprite.Sprite):
         # Setup.
         super().__init__()
 
+        self.in_score_zone: bool = False
         self.__can_fly: bool = True  # Locking system to prevent spamming.
         self.__state: BirdStateEnum = BirdStateEnum.STANDBY
         self.__config: Config = config
@@ -65,6 +69,11 @@ class Bird(pg.sprite.Sprite):
         self.__rect: Rect = self.__sprite.get_rect()
         self.__initial_position: Position = position
         self.__rect.center = position
+
+        # Score counter.
+        self.__score_counter: src.objects.score_counter.ScoreCounter = (
+            src.objects.score_counter.ScoreCounter()
+        )
 
         LOGGER.success("Bird initialized")
 
@@ -114,6 +123,22 @@ class Bird(pg.sprite.Sprite):
     def rect(self) -> Rect:
         return self.__rect
 
+    @property
+    def score(self) -> int:
+        """Get the score for the bird instance."""
+
+        return self.__score_counter.score
+
+    def increment_score(self) -> None:
+        """Increment the birds score."""
+
+        self.__score_counter.increment()
+
+    def reset_score(self) -> None:
+        """Reset the scoreboard for this bird."""
+
+        self.__score_counter.reset()
+
     def draw(self, window: Surface):
         """Draw the bird to the game window."""
 
@@ -156,7 +181,9 @@ class Bird(pg.sprite.Sprite):
 
         self.__rect.center = self.__initial_position
         self.__can_fly = True
+        self.in_score_zone = False
         self.__state = BirdStateEnum.STANDBY
+        self.__score_counter.reset()
 
     #########################
     ##   PRIVATE METHODS   ##

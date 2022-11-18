@@ -5,5 +5,4 @@ __name__ = "enums"
 __version__ = "0.1.0"
 
 from .bird_state import BirdStateEnum
-from .player import PlayerEnum
 from .game_state import GameStateEnum

@@ -10,10 +10,13 @@ import sys
 import tomllib
 
 # Pip imports.
+import neat
 import pygame
 
 # Local imports.
+import src.objects.ai
 import src.objects.game
+import src.objects.bird
 from src.utils.stenographer import Stenographer
 from src.utils.types import *
 
@@ -24,23 +27,21 @@ from src.utils.types import *
 
 LOGGER: Stenographer = Stenographer.create_logger()
 GAME_CONFIG_PATH: str = "src/config/game_config.toml"
-AI_CONFIG_PATH: str = "src/config/ai_config.toml"
+AI_CONFIG_PATH: str = "src/config/ai_config.cfg"
 GAME_CONFIG_FILE: pathlib.Path = pathlib.Path().cwd() / GAME_CONFIG_PATH
 AI_CONFIG_FILE: pathlib.Path = pathlib.Path().cwd() / AI_CONFIG_PATH
-
-
-###############
-##   LOGIC   ##
-###############
+GENERATIONS: int | None = None
 
 
 def __load_configurations(path: pathlib.Path) -> Config:
     """Load configurations from a configuration file."""
 
+    # Make sure the path exists.
     if not path.exists():
         raise FileNotFoundError(f"File {path} not found")
 
     try:
+        # Read the configurations.
         with open(path, "rb") as stream:
             configurations: dict = tomllib.load(stream)
     except tomllib.TOMLDecodeError:
@@ -49,18 +50,33 @@ def __load_configurations(path: pathlib.Path) -> Config:
         return configurations
 
 
-def __play_game(game_config: Config, ai_config: Config | None = None) -> None:
-    """Play Crappy Bird."""
+def __play_game(game_config: Config) -> None:
+    """Play the game of Flappy Bird."""
 
-    LOGGER.info(f"{'AI' if ai_config is not None else 'Human'} is playing game")
-    with src.objects.game.Game(game_config, ai_config) as game:
-        try:
-            game.play()
-        except pygame.error as error:
-            LOGGER.warning(f"Pygame is complaining: {str(error).capitalize()}")
+    LOGGER.info("A human player is playing the game")
 
-    LOGGER.info("User closed the game")
-    LOGGER.operation("Shutting down")
+    try:
+        game: src.objects.game.Game = src.objects.game.Game(game_config)
+        game.play()
+    except pygame.error as error:
+        LOGGER.warning(f"Pygame is complaining: {str(error).capitalize()}")
+
+    LOGGER.info("Player closed the game")
+
+
+def __train_ai(game_config: Config) -> None:
+    """Train the AI on the game."""
+
+    LOGGER.info("Initializing AI training sequence")
+
+    ai: src.objects.ai.AI = src.objects.ai.AI(game_config)
+    ai.train(GENERATIONS, verbose=True)
+
+
+def __test_ai(game_config: Config, superior_genome: Any) -> None:
+    """Test the AI on the game."""
+
+    raise NotImplemented
 
 
 ##############
@@ -74,19 +90,24 @@ def __main() -> None:
     # Parse program arguments.
     program_arguments: Iterable[str] = sys.argv
 
+    # Load configurations.
     try:
-        # Parse configurations.
         game_config: Config = __load_configurations(GAME_CONFIG_FILE)
-        ai_config: Config = __load_configurations(AI_CONFIG_FILE)
     except (ValueError, tomllib.TOMLDecodeError) as error:
-        # Log error and exit program.
-        LOGGER.critical(error)
-        LOGGER.critical("Program is shutting down")
-    else:
-        # Play game.
-        if "-A" in program_arguments or "--ai" in program_arguments:
-            return __play_game(game_config, ai_config)
-        return __play_game(game_config)
+        return LOGGER.critical(error)
+
+    # Match program arguments and execute.
+    match program_arguments:
+        case [_, "--ai-train"]:
+            return __train_ai(game_config)
+        case [_, "--ai-test"]:
+            raise NotImplemented
+        case [_]:
+            return __play_game(game_config)
+        case _:
+            raise ValueError(
+                f"Invalid program arguments: {program_arguments[1:]}"
+            )
 
 
 if __name__ == "__main__":
