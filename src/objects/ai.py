@@ -23,8 +23,8 @@ class AI:
     __ACTIVATION_THRESHOLDS: dict[str, float] = {"tanh": 0.5}
 
     __CONFIG_PATH: str = "src/config/ai_config.cfg"
-    __REWARD: int = 15
-    __PENALTY: int = 100
+    __REWARD: int = 50
+    __PENALTY: int = 500
 
     def __init__(self, game_config: Config) -> None:
         """Initialize an AI instance."""
@@ -44,6 +44,7 @@ class AI:
         self.__active_genotypes: list[neat.DefaultGenome] | None = None
         self.__active_phenotypes: list[neat.nn.FeedForwardNetwork] | None = None
         self.__current_generation: int = 0
+        self.__draw_skip_interval: int = 5
 
         LOGGER.success("AI initialized")
 
@@ -114,11 +115,14 @@ class AI:
 
         self.__active_genotypes[genome_id].fitness += amount or self.__REWARD
 
+    # noinspection PyTypeChecker
     def train(self, max_generations: int = 30, verbose: bool = True) -> None:
         """Train the AI on the game."""
 
         # Create the population.
         population: neat.Population = neat.Population(self.__ai_config)
+        for _, genome in population.population.items():
+            genome.fitness = 0.0
 
         # Add reporters if running in verbose mode.
         if verbose:
@@ -147,12 +151,9 @@ class AI:
     ) -> None:
         """This is the fitness function for the AI."""
 
-        LOGGER.operation(f"Training generation {self.__current_generation:,}")
-
         # Add genomes and networks to current generation.
         self.__active_genotypes, self.__active_phenotypes = [], []
         for _, genome in population:
-            # Set the initial fitness score for the genome.
             genome.fitness = 0.0
 
             # Create the neural network.
@@ -170,12 +171,13 @@ class AI:
         self.__game.state = GameStateEnum.PLAYING
 
         try:
-            self.__game.play()
+            self.__game.play(
+                random_seed=42,
+                draw=not self.__current_generation % self.__draw_skip_interval,
+            )
         except KeyboardInterrupt:
             pg.quit()
             raise
-
-        LOGGER.success(f"Generation {self.__current_generation:,} trained")
 
         # Increment the generation counter.
         self.__current_generation += 1

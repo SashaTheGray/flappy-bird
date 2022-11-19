@@ -21,8 +21,11 @@ game_name = "Flappy Bird"
 ##############
 [game]
 
-# Frames per second.
-fps = 60.0                      # Default: 60.0
+# Frames per second when updating game assets.
+update_fps = 60.0                      # Default: 60.0
+
+# Frames per seconds when drawing to the screen.
+render_fps = 60.0                      # Default: 60.0
 
 # Speed of wich the bird is flying at.
 flying_speed = 3                # Default: 3
@@ -48,8 +51,8 @@ jump_velocity_negation = -4     # Default: -4
 # How much the bird rotates when falling/flying.
 rotation_factor = -5            # Default: -5
 
-# Obstacle spawn frequency in milliseconds.
-obstacle_frequency = 1_500      # Default: 1_500
+# Obstacle spawn frequency in frames per second.
+obstacle_frequency = 90         # Default: 90
 
 # Gap between obstacles.
 obstacle_gap = 90               # Default: 80

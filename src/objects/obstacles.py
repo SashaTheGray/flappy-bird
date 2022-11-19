@@ -25,7 +25,9 @@ class Obstacle(pygame.sprite.Sprite, metaclass=abc.ABCMeta):
 
     obstacles_in_game: int = 0
 
-    def __init__(self, position: Position, config: Config) -> None:
+    def __init__(
+        self, position: Position, config: Config, time_rate: int
+    ) -> None:
         """Initialise an obstacle instance."""
 
         super().__init__()
@@ -33,6 +35,7 @@ class Obstacle(pygame.sprite.Sprite, metaclass=abc.ABCMeta):
         self._config: Config = config
         self._sprite: pygame.Surface | None = None
         self._rect: pygame.Rect | None = None
+        self.__time_rate: int = time_rate
 
     @property
     def image(self) -> pygame.Surface:
@@ -50,7 +53,7 @@ class Obstacle(pygame.sprite.Sprite, metaclass=abc.ABCMeta):
         """On new frame update method."""
 
         # Get the scroll speed of the game.
-        self.rect.x -= self._config["game"]["flying_speed"]
+        self.rect.x -= self._config["game"]["flying_speed"] * self.__time_rate
 
         # Delete obstacles when they go off-screen.
         if self.rect.right < 0:
@@ -61,11 +64,16 @@ class Pipe(Obstacle):
     """Representing a pipe obstacle."""
 
     def __init__(
-        self, position: Position, config: Config, *, reversed_: bool = False
+        self,
+        position: Position,
+        config: Config,
+        *,
+        reversed_: bool = False,
+        time_rate: int
     ) -> None:
         """Initialize a pipe instance."""
 
-        super().__init__(position, config)
+        super().__init__(position, config, time_rate)
         self._sprite: pygame.Surface = utils.load_asset(
             self._config.get("assets")
             .get("images")

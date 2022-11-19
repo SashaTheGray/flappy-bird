@@ -1,8 +1,5 @@
 """This is the main module of the software."""
-
-#################
-##   IMPORTS   ##
-#################
+import math
 
 # Python core imports.
 import pathlib
@@ -10,15 +7,18 @@ import sys
 import tomllib
 
 # Pip imports.
-import neat
 import pygame
 
 # Local imports.
 import src.objects.ai
-import src.objects.game
 import src.objects.bird
+import src.objects.game
 from src.utils.stenographer import Stenographer
 from src.utils.types import *
+
+#################
+##   IMPORTS   ##
+#################
 
 ###################
 ##   CONSTANTS   ##
@@ -30,7 +30,7 @@ GAME_CONFIG_PATH: str = "src/config/game_config.toml"
 AI_CONFIG_PATH: str = "src/config/ai_config.cfg"
 GAME_CONFIG_FILE: pathlib.Path = pathlib.Path().cwd() / GAME_CONFIG_PATH
 AI_CONFIG_FILE: pathlib.Path = pathlib.Path().cwd() / AI_CONFIG_PATH
-GENERATIONS: int | None = None
+GENERATIONS: int | float | None = math.inf
 
 
 def __load_configurations(path: pathlib.Path) -> Config:

@@ -71,10 +71,11 @@ class Ground(pg.sprite.Sprite):
         # Move the screen while the whole spite isn't visible.
         if (
             abs(self.__rect.x)
-            <= self.GROUND_SLIDE_OFFSET * self.__config["window"]["height"]
-            - 70
+            <= self.GROUND_SLIDE_OFFSET * self.__config["window"]["height"] - 70
         ):
-            self.__rect.x -= self.__config["game"]["flying_speed"]
+            self.__rect.x -= (
+                self.__config["game"]["flying_speed"] * self.__game.time_rate
+            )
 
         # Reset the sprite to its original position.
         else:

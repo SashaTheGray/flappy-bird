@@ -23,9 +23,7 @@ from src.utils.types import *
 if TYPE_CHECKING:
     from pygame import Surface, Rect
 
-LOGGER: Stenographer = Stenographer.create_logger(
-    stream_handler_level=30
-)
+LOGGER: Stenographer = Stenographer.create_logger(stream_handler_level=30)
 
 
 ###############
@@ -41,7 +39,9 @@ class Bird(pg.sprite.Sprite):
     ##   DUNDER METHODS   ##
     ########################
 
-    def __init__(self, position: Position, config: Config) -> None:
+    def __init__(
+        self, position: Position, config: Config, time_rate: int
+    ) -> None:
         """Initialize a Bird instance."""
 
         LOGGER.operation("Initializing bird")
@@ -50,6 +50,7 @@ class Bird(pg.sprite.Sprite):
         super().__init__()
 
         self.in_score_zone: bool = False
+        self.__time_rate: int = time_rate
         self.__can_fly: bool = True  # Locking system to prevent spamming.
         self.__state: BirdStateEnum = BirdStateEnum.STANDBY
         self.__config: Config = config
@@ -239,7 +240,9 @@ class Bird(pg.sprite.Sprite):
 
         # Increment velocity while it's lower than max velocity.
         if self.__velocity < self.__max_velocity:
-            self.__velocity += self.__config["game"]["drop_rate"]
+            self.__velocity += (
+                self.__config["game"]["drop_rate"] * self.__time_rate
+            )
 
         # Modify altitude in accordance to current velocity.
         self.__rect[1] += self.__velocity

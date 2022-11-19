@@ -7,7 +7,6 @@
 from __future__ import annotations
 
 # Python core imports.
-import math
 import random
 
 # Local imports.
@@ -33,9 +32,6 @@ LOGGER: Stenographer = Stenographer.create_logger()
 
 # The action key for the game.
 ACTION_KEY: int = pg.K_SPACE
-
-# Pygame tick delay in milliseconds.
-DELAY: int = 10
 
 
 ###############
@@ -68,6 +64,7 @@ class Game:
             )
 
         # AI setup.
+        self.__random_generator: random.Random = random.Random()
         self.__is_ai: bool = ai is not None
         self.__ai: src.objects.ai.AI | None = ai
 
@@ -90,14 +87,15 @@ class Game:
         self.__ground_group.add(self.__ground)
         self.__intel: src.objects.intel_screen.IntelScreen = (
             src.objects.intel_screen.IntelScreen(
-                self.__config, text_colour=(0, 0, 0)
+                self, self.__config, text_colour=(0, 0, 0)
             )
         )
         self.__obstacles: pg.sprite.AbstractGroup = pg.sprite.Group()
-        self.__last_obstacle_spawn_time: float = (
-            pg.time.get_ticks()
-            - self.__config.get("game").get("obstacle_frequency")
-        )
+        self.__last_obstacle_spawn_frame: int = 0
+        self.__frame_counter: int = 0
+
+        self.time_rate: int = 1  # TODO: Remove -> Cleanup.
+        self.__draw_timer: float = 0
 
         LOGGER.success("Game initialized")
 
@@ -114,6 +112,18 @@ class Game:
         # TODO: Validate state.
         self.__game_state = state
 
+    @property
+    def birds(self) -> pg.sprite.AbstractGroup:
+        return self.__birds
+
+    @property
+    def obstacles(self) -> pg.sprite.AbstractGroup:
+        return self.__obstacles
+
+    @property
+    def is_ai(self) -> bool:
+        return self.__is_ai
+
     # noinspection PyTypeChecker
     def add_bird(self, amount: int = 1) -> None:
         """Add a bird to the game."""
@@ -125,17 +135,25 @@ class Game:
                     self.__window.get_height() // 2,
                 ),
                 config=self.__config,
+                time_rate=self.time_rate,
             )
 
             self.__birds.add(bird)
 
-        LOGGER.debug(f"Added {amount:,} birds to game")
-
-    def play(self) -> None:
+    def play(self, random_seed: int | None = None, draw=True) -> None:
         """Play the game as human."""
+
+        self.__draw = draw
+
+        if random_seed is not None:
+            self.__random_generator.seed(random_seed)
 
         if not self.__is_ai:
             self.add_bird()
+
+        self.__last_obstacle_spawn_frame = 0
+        self.__frame_counter = 0
+        self.__draw_timer = 0.0
 
         # Game loop.
         keep_playing = True
@@ -144,15 +162,21 @@ class Game:
             if not len(self.__birds):
                 break
 
-            # Set delay tick delay.
-            pg.time.delay(DELAY)
-
-            # Set frame rate.
-            self.__clock.tick(self.__config["game"]["fps"])
+            self.__frame_counter += self.time_rate
 
             # Control game.
             self.__spawn_obstacle_pair()
-            self.__draw_assets()
+
+            if self.__is_ai:
+                self.__draw_timer -= self.__clock.tick()
+            else:
+                self.__draw_timer -= self.__clock.tick(
+                    self.__config["game"]["update_fps"]
+                )
+
+            if draw and self.__draw_timer <= 0.0:
+                self.__draw_timer += 1_000 / self.__config["game"]["render_fps"]
+                self.__draw_assets()
 
             # Bird controllers.
             if self.__is_ai and len(self.__obstacles):
@@ -166,6 +190,11 @@ class Game:
             # Handle game events and update the game.
             keep_playing = self.__handle_game_events()
             self.__update()
+
+            # Reward all birds alive if they are alive at this point.
+            if self.__is_ai:
+                for idx in range(len(self.__birds)):
+                    self.__ai.reward(idx, 0.01)
 
         # Enforce the game to restart for when the AI is playing.
         if self.__is_ai and keep_playing:
@@ -187,14 +216,18 @@ class Game:
             bird.state = BirdStateEnum.FLYING
 
             # Observe input parameters.
-            altitude: float = bird.rect.y
-            btm_pipe_delta, top_pipe_delta = get_pipe_deltas(
-                bird, self.__obstacles
+            top_pipe, btm_pipe = utils.get_next_obstacle_pair_points(
+                bird.rect.center[0], self.__obstacles
             )
+
+            # Calculate input parameters.
+            delta_y_to_top: float = bird.rect.y - top_pipe.rect.bottomright[1]
+            delta_y_to_btm: float = bird.rect.y - btm_pipe.rect.topright[1]
+            delta_x: float = btm_pipe.rect.topright[0] - bird.rect.x
 
             if self.__ai.should_fly(
                 genome_id=idx,
-                input_parameters=(altitude, top_pipe_delta, btm_pipe_delta),
+                input_parameters=(delta_x, delta_y_to_top, delta_y_to_btm),
             ):
                 bird.fly()
 
@@ -204,7 +237,7 @@ class Game:
 
         # Return if the spawn interval has not been reached or bird not flying.
         if (
-            pg.time.get_ticks() - self.__last_obstacle_spawn_time
+            self.__frame_counter - self.__last_obstacle_spawn_frame
             < self.__config["game"]["obstacle_frequency"]
             or self.__game_state != GameStateEnum.PLAYING
         ):
@@ -217,7 +250,9 @@ class Game:
         obstacle_gap: int = self.__config["game"]["obstacle_gap"] // 2
 
         # Height offset to randomize heights.
-        height_offset: int = random.randint(-100, 100) - obstacle_gap
+        height_offset: int = (
+            self.__random_generator.randint(-100, 100) - obstacle_gap
+        )
 
         # Create the top_obstacle.
         top_obstacle: pg.sprite.Sprite = src.objects.obstacles.Pipe(
@@ -229,6 +264,7 @@ class Game:
             ),
             self.__config,
             reversed_=True,
+            time_rate=self.time_rate,
         )
 
         # Create the bottom_obstacle.
@@ -241,18 +277,14 @@ class Game:
             ),
             self.__config,
             reversed_=False,
+            time_rate=self.time_rate,
         )
 
         self.__obstacles.add(top_obstacle)
         self.__obstacles.add(bottom_obstacle)
 
         # Reset spawn interval timer.
-        self.__last_obstacle_spawn_time = pg.time.get_ticks()
-
-        # Reward all birds alive if they are alive at this point.
-        if self.__is_ai:
-            for idx in range(len(self.__birds)):
-                self.__ai.reward(idx, 10)
+        self.__last_obstacle_spawn_frame = self.__frame_counter
 
     def __draw_assets(self) -> None:
         """Draw the game assets to on the window."""
@@ -343,12 +375,21 @@ class Game:
             elif self.__is_ai:
 
                 # Penalize the genome for causing a collision.
-                self.__ai.penalize(idx)
+                if ground_collision:
+                    self.__ai.penalize(idx)
 
                 # Remove bird's pheno- and genotype from current generation.
                 self.__ai.remove(idx)
 
                 # Remove the bird from birds in current generation.
+                if len(self.__birds) == 1:
+                    if self.__draw:
+                        self.__draw_assets()
+
+                    LOGGER.info(
+                        f"Best bird in generation with score: "
+                        f"{self.__birds.sprites()[0].score}"
+                    )
                 self.__birds.remove(bird)
 
             # Only applicable for humans, set game state and kill the bird.
@@ -547,33 +588,3 @@ def get_menu_position(window: pg.Surface, menu: pg.Surface) -> Position:
         (window.get_width() - menu.get_width()) // 2,
         (window.get_height() - menu.get_height()) // 3,
     )
-
-
-def get_pipe_deltas(
-    bird: src.objects.bird.Bird, obstacles: pg.sprite.AbstractGroup
-) -> tuple[float, float]:
-    """Get the distance from the bird to the start of the next obstacle gap."""
-
-    bird_x: int = bird.rect.x
-    x_of_next_pair: float = obstacles.sprites()[0].rect.x
-    btm_idx, top_idx = (0, 1) if bird_x < x_of_next_pair else (2, 3)
-
-    # Get the pipes.
-    btm_pipe: src.objects.obstacles = obstacles.sprites()[btm_idx]
-    top_pipe: src.objects.obstacles = obstacles.sprites()[top_idx]
-
-    # Get the corner positions.
-    btm_pipe_point: Position = btm_pipe.rect.topleft
-    top_pipe_point: Position = top_pipe.rect.topright
-
-    # Return the distance measurements: bird -> btm_pipe, bird -> top_pipe.
-    return (
-        get_distance(bird.rect.center, btm_pipe_point),
-        get_distance(bird.rect.center, top_pipe_point),
-    )
-
-
-def get_distance(point_1: Position, point_2: Position) -> float:
-    """Get the distance between the two points."""
-
-    return math.dist(point_1, point_2)
