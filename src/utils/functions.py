@@ -1,25 +1,42 @@
 """This module contains common utility functions for the program."""
 
+#################
+##   IMPORTS   ##
+#################
+
+
+# Python core imports.
 from __future__ import annotations
 
 import pathlib
 
-import pygame
-
+# Local imports.
+from src.exceptions import MissingConfigurationError
 from src.utils.types import *
 
+###################
+##   CONSTANTS   ##
+###################
+
+VOID_CONFIG_ERROR: str = "Config missing for key '{}'"
+
+
+###################
+##   FUNCTIONS   ##
+###################
+
 
 @overload
-def load_asset(paths: Iterable[str | pathlib.Path]) -> pygame.Surface:
+def load_asset(path: Iterable[str | pathlib.Path]) -> Sequence[pg.Surface]:
     ...
 
 
 @overload
-def load_asset(path: str | pathlib.Path) -> Sequence[pygame.Surface]:
+def load_asset(path: str | pathlib.Path) -> pg.Surface:
     ...
 
 
-def load_asset(path):
+def load_asset(path) -> pg.Surface | Sequence[pg.Surface]:
     """Load asset from a file."""
 
     # Handle a single path.
@@ -31,7 +48,7 @@ def load_asset(path):
         if not path.exists():
             raise FileNotFoundError(f"File {path} not found")
 
-        return pygame.image.load(path)
+        return pg.image.load(path)
 
     # Handle an iterable of paths.
     elif isinstance(path, Iterable):
@@ -46,20 +63,62 @@ def load_asset(path):
 
             paths.append(p)
 
-        return [pygame.image.load(p) for p in paths]
+        return [pg.image.load(p) for p in paths]
 
     # Type is not supported.
     else:
         raise TypeError(f"Type {type(path)} not supported for path")
 
 
-def get_next_obstacle_pair_points(
-    x_value: int, obstacles: pg.sprite.AbstractGroup
+def get_config_value(config: Config, key: str, separator: str = ".") -> Any:
+    """Get a value from a config object.
+
+    :param config: The game configuration object.
+    :param key: Key holding the value to get.
+    :param separator: The nested key separator.
+    :raises MissingConfigurationError: If configuration os missing.
+    """
+
+    try:
+
+        # Get value from config.
+        value: Any = config
+        for k in key.split(separator):
+            value = value.get(k)
+
+        # Value cannot be None.
+        if value is None:
+            raise AttributeError
+
+        return value
+
+    except (AttributeError, TypeError):
+        raise MissingConfigurationError(VOID_CONFIG_ERROR.format(key))
+
+
+@overload
+def get_next_pipe_pair(
+    x_value: int, pipes: Sequence[pg.sprite.Sprite]
 ) -> tuple[pg.sprite.Sprite, pg.sprite.Sprite]:
-    """"""
+    ...
+
+
+def get_next_pipe_pair(
+    x_value: int, pipes: pg.sprite.Group
+) -> tuple[pg.sprite.Sprite, pg.sprite.Sprite]:
+    """Return the next obstacle pair in front of the birds."""
 
     # Determine the next pair of pipes.
-    x_of_next_pair: int = obstacles.sprites()[0].rect.right
+    if isinstance(pipes, pg.sprite.AbstractGroup):
+        x_of_next_pair: int = pipes.sprites()[0].rect.right
+    elif isinstance(pipes, Sequence):
+        x_of_next_pair: int = pipes[0].rect.right
+    else:
+        raise TypeError(
+            "Expected types 'pg.sprite.AbstractGroup' | "
+            "'Sequence[pg.sprite.Sprite]' for argument 'pipes', "
+            f"got '{type(pipes)}'"
+        )
 
     if x_value <= x_of_next_pair:
         top_idx, btm_idx = 0, 1
@@ -67,7 +126,12 @@ def get_next_obstacle_pair_points(
         top_idx, btm_idx = 2, 3
 
     # Get the pipes.
-    top_pipe: pg.sprite.Sprite = obstacles.sprites()[top_idx]
-    btm_pipe: pg.sprite.Sprite = obstacles.sprites()[btm_idx]
+    if isinstance(pipes, pg.sprite.AbstractGroup):
+        top_pipe: pg.sprite.Sprite = pipes.sprites()[top_idx]
+        btm_pipe: pg.sprite.Sprite = pipes.sprites()[btm_idx]
+    else:
+
+        top_pipe: pg.sprite.Sprite = pipes[top_idx]
+        btm_pipe: pg.sprite.Sprite = pipes[btm_idx]
 
     return top_pipe, btm_pipe

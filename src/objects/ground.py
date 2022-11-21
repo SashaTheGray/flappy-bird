@@ -1,82 +1,131 @@
-"""This module contains the Ground class."""
+"""This module contains the Ground class.
+
+This class represents the ground in the game, which you should stay above.
+"""
+
+#################
+##   IMPORTS   ##
+#################
 
 from __future__ import annotations
 
+# Local imports.
 import src.utils.functions as utils
-from src.utils.stenographer import Stenographer
 from src.enums import GameStateEnum
+from src.exceptions import MissingConfigurationError
+from src.utils.stenographer import Stenographer
 from src.utils.types import *
 
 if TYPE_CHECKING:
-    from src.objects.game import Game
-    from pygame import Surface, Rect
+    import src.objects.game
 
-LOGGER = Stenographer.create_logger()
+###################
+##   CONSTANTS   ##
+###################
+
+LOGGER: Stenographer = Stenographer.create_logger()
 
 
-@final
+###############
+##   CLASS   ##
+###############
+
+
 class Ground(pg.sprite.Sprite):
-    """Representing the ground in the game."""
+    """Representing the ground object in the game."""
 
     # Offset for the ground sprite stretching off-screen.
-    GROUND_SLIDE_OFFSET: float = 0.5
+    __GROUND_SLIDE_OFFSET: float = 0.4
 
-    def __init__(self, position: Position, game: Game, config: Config) -> None:
+    # Ground height offset.
+    __GROUND_HEIGHT_OFFSET: float = 0.85
+
+    ########################
+    ##   DUNDER METHODS   ##
+    ########################
+
+    def __init__(self, game: src.objects.game.Game, config: Config) -> None:
         """Initialize a Ground instance."""
 
-        LOGGER.operation("Initializing ground")
+        LOGGER.operation("Initializing Ground instance")
 
-        super().__init__()
+        super(Ground, self).__init__()
 
-        self.__initial_position: Position = position
-        self.__position: Position = position
-        self.__game: Game = game
+        self.__game: src.objects.game.Game = game
         self.__config: Config = config
-        self.__sprite: Surface = utils.load_asset(
-            self.__config.get("assets").get("images").get("ground")
+        self.__initial_position: Position = (
+            0,
+            int(game.window.get_height() * self.__GROUND_HEIGHT_OFFSET),
         )
-        self.__sprite = pg.transform.scale(
-            self.__sprite,
-            (
-                self.__config["window"]["width"]
-                * (1 + self.GROUND_SLIDE_OFFSET),
-                self.__sprite.get_height(),
-            ),
-        )
-        self.__rect: Rect = self.__sprite.get_rect()
+        self.__position: Position = self.__initial_position
+
+        self.__sprite: pg.Surface = self.__load_sprite()
+        self.__rect: pg.Rect = self.__sprite.get_rect()
         self.__rect.topleft = self.__position
 
-        LOGGER.success("Ground initialized")
+        LOGGER.success("Ground instance initialized")
+
+    ####################
+    ##   PROPERTIES   ##
+    ####################
 
     @property
-    def image(self) -> Surface:
+    def image(self) -> pg.Surface:
+        """Get the ground's image for drawing."""
+
         return self.__sprite
 
     @property
-    def rect(self) -> Rect:
+    def rect(self) -> pg.Rect:
+        """Get the ground's collision box."""
+
         return self.__rect
 
-    def draw(self, window: Surface) -> None:
-        """Draw the ground on the game window."""
+    ########################
+    ##   PUBLIC METHODS   ##
+    ########################
 
-        window.blit(self.__sprite, self.__rect)
-
-    def update(self) -> None:
+    def update(self, speed: int) -> None:
         """Update the ground."""
 
-        # Ground should not move if the game is over.
+        # Do not update ground when game is over.
         if self.__game.state == GameStateEnum.OVER:
             return
 
         # Move the screen while the whole spite isn't visible.
         if (
             abs(self.__rect.x)
-            <= self.GROUND_SLIDE_OFFSET * self.__config["window"]["height"] - 70
+            <= self.__GROUND_SLIDE_OFFSET * self.__game.window.get_width()
         ):
-            self.__rect.x -= (
-                self.__config["game"]["flying_speed"] * self.__game.time_rate
-            )
+            self.__rect.x -= speed
 
         # Reset the sprite to its original position.
         else:
             self.__rect.topleft = self.__initial_position
+
+    #########################
+    ##   PRIVATE METHODS   ##
+    #########################
+
+    def __load_sprite(self) -> pg.Surface:
+        """Load the ground sprite."""
+
+        # Get sprite path.
+        try:
+            sprite_path: str = utils.get_config_value(
+                self.__config, "assets.images.ground"
+            )
+        except MissingConfigurationError:
+            raise
+
+        sprite: pg.Surface = utils.load_asset(sprite_path)
+        sprite = pg.transform.scale(
+            surface=sprite,
+            size=(
+                self.__game.window.get_width()
+                * (1 + self.__GROUND_HEIGHT_OFFSET),
+                sprite.get_height(),
+            ),
+        )
+
+        return sprite

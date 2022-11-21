@@ -1,10 +1,40 @@
 """This module contains types for type hinting."""
 
 import pygame as pg
+import neat
 
 # Import the Python typing library for convenience.
-from typing import *
-from types import *
+from typing import (
+    Iterator,
+    Iterable,
+    Sequence,
+    final,
+    overload,
+    Any,
+    TYPE_CHECKING,
+    Callable,
+    BinaryIO
+)
+
+__all__ = [
+    "Config",
+    "Position",
+    "Drawable",
+    "RGB",
+    "Genotype",
+    "Phenotype",
+    "Iterator",
+    "Iterable",
+    "Sequence",
+    "final",
+    "overload",
+    "pg",
+    "neat",
+    "Any",
+    "TYPE_CHECKING",
+    "Callable",
+    "BinaryIO"
+]
 
 # Type aliases.
 __AI_CONFIG = dict[str, float]
@@ -19,3 +49,5 @@ Drawable = (
 )
 
 RGB = tuple[int, int, int]
+Genotype = neat.DefaultGenome
+Phenotype = neat.nn.FeedForwardNetwork

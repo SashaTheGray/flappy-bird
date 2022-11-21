@@ -1,54 +1,52 @@
-"""This module contains the ScoreCounter class."""
+"""This module contains the ScoreCounter class.
+
+ScoreCounter maintains the total score for birds.
+"""
+
 
 #################
 ##   IMPORTS   ##
 #################
 
-# Pip imports.
-
-# Local imports.
-from src.utils.stenographer import Stenographer
-
 ###################
 ##   CONSTANTS   ##
 ###################
 
-LOGGER: Stenographer = Stenographer.create_logger(
-    stream_handler_level=30
-)
-
-
-###############
-##   CLASS   ##
-###############
-
 
 class ScoreCounter:
-    """Representing the score counter in the game."""
+    """"""
 
-    def __init__(self) -> None:
-        """Initialize a ScoreCounter instance."""
+    ########################
+    ##   DUNDER METHODS   ##
+    ########################
 
-        LOGGER.operation("Initializing score counter")
-
-        super().__init__()
+    def __init__(self):
         self.__score: int = 0
-        self.__last_update_score: int = 0
 
-        LOGGER.success("Score counter initialized")
+    ####################
+    ##   PROPERTIES   ##
+    ####################
 
     @property
     def score(self) -> int:
-        """Getter for the score."""
+        """Get the current score."""
 
         return self.__score
 
+    ########################
+    ##   PUBLIC METHODS   ##
+    ########################
+
     def increment(self) -> None:
-        """Increment score."""
+        """Increment the current score by 1."""
 
         self.__score += 1
 
     def reset(self) -> None:
-        """Reset the score counter."""
+        """Reset the instance."""
 
         self.__score = 0
+
+    #########################
+    ##   PRIVATE METHODS   ##
+    #########################

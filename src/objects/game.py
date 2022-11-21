@@ -1,4 +1,7 @@
-"""This module contains the game controller."""
+"""This module contains the game class.
+
+It represents the game and is the main controller for Flappy Bird.
+"""
 
 #################
 ##   IMPORTS   ##
@@ -10,27 +13,25 @@ from __future__ import annotations
 import random
 
 # Local imports.
-import src.objects.ai
 import src.objects.bird
 import src.objects.ground
-import src.objects.intel_screen
-import src.objects.obstacles
-import src.objects.score_counter
+import src.objects.illustrator
+import src.objects.pipe
+import src.objects.speedometer
 import src.utils.functions as utils
-from src.enums import BirdStateEnum, GameStateEnum
+from src.enums import GameStateEnum, BirdStateEnum
+from src.exceptions import MissingConfigurationError
 from src.utils.stenographer import Stenographer
 from src.utils.types import *
 
-# Pip imports.
+if TYPE_CHECKING:
+    import src.objects.ai
 
 ###################
 ##   CONSTANTS   ##
 ###################
 
-# The logger instance for this module.
 LOGGER: Stenographer = Stenographer.create_logger()
-
-# The action key for the game.
 ACTION_KEY: int = pg.K_SPACE
 
 
@@ -41,329 +42,243 @@ ACTION_KEY: int = pg.K_SPACE
 
 @final
 class Game:
-    """Flappy Bird game class."""
+    """The game controller for this project."""
 
     ########################
     ##   DUNDER METHODS   ##
     ########################
 
-    # noinspection PyTypeChecker
     def __init__(
-        self, game_config: Config, ai: src.objects.ai.AI | None = None
+        self, game_config: Config, ai: src.objects.ai.NeatAITrain | None = None
     ) -> None:
-        """Initialize a Game instance."""
+        """Initialize a Game instance.
 
-        LOGGER.operation("Initializing game")
+        :param game_config: The game configurations.
+        :param ai: Instance of a NEAT-AI class.
+        """
+
+        LOGGER.operation("Initializing Game instance")
+
         pg.init()
 
-        # Validate game_config.
-        if not isinstance(game_config, Mapping):
-            raise TypeError(
-                f"Unsupported type {type(game_config)} "
-                "for argument 'game_config'"
-            )
-
-        # AI setup.
-        self.__random_generator: random.Random = random.Random()
-        self.__is_ai: bool = ai is not None
-        self.__ai: src.objects.ai.AI | None = ai
-
-        # Game setup.
         self.__config: Config = game_config
-        self.__game_state: GameStateEnum = GameStateEnum.MAIN_MENU
-        self.__window: pg.Surface = pg.display.set_mode(
-            (
-                self.__config["window"]["width"],
-                self.__config["window"]["height"],
-            )
-        )
-        pg.display.set_caption(self.__config["window"]["game_name"])
+        self.__ai: src.objects.ai.NeatAITrain | None = ai
+        self.__is_ai: bool = self.__ai is not None
+        self.__random_generator: random.Random = random.Random()
+        self.__state: GameStateEnum = GameStateEnum.MAIN_MENU
+        self.__window: pg.Surface = self.__init__window()
         self.__clock: pg.time.Clock = pg.time.Clock()
-        self.__birds: pg.sprite.AbstractGroup = pg.sprite.AbstractGroup()
-        self.__ground_group: pg.sprite.AbstractGroup = pg.sprite.AbstractGroup()
-        self.__ground: src.objects.ground.Ground = src.objects.ground.Ground(
-            (0, int(self.__window.get_height() * 0.85)), self, self.__config
+        self.__illustrator: src.objects.illustrator.Illustrator = (
+            src.objects.illustrator.Illustrator(config=self.__config, game=self)
         )
-        self.__ground_group.add(self.__ground)
-        self.__intel: src.objects.intel_screen.IntelScreen = (
-            src.objects.intel_screen.IntelScreen(
-                self, self.__config, text_colour=(0, 0, 0)
-            )
+        self.__speedometer: src.objects.speedometer.Speedometer = (
+            src.objects.speedometer.Speedometer(self.__config)
         )
-        self.__obstacles: pg.sprite.AbstractGroup = pg.sprite.Group()
+
+        self.__score_zone: set[int] = set()
+        self.__birds: pg.sprite.Group = pg.sprite.Group()
+        self.__ground: pg.sprite.Group = self.__init__ground()
+        self.__pipes: pg.sprite.Group = pg.sprite.Group()
+
+        # Pipe spawn control variables.
         self.__last_obstacle_spawn_frame: int = 0
+
+        self.__spawn_frequency: int = utils.get_config_value(
+            self.__config, "pipe.spawn_frequency"
+        )
+        self.__obstacle_gap: int = utils.get_config_value(
+            self.__config, "pipe.pipe_gap"
+        )
+        self.__off_screen_spawn_offset: int = utils.get_config_value(
+            self.__config, "pipe.off_screen_offset"
+        )
+        self.__gap_offset: int = utils.get_config_value(
+            self.__config, "pipe.pipe_gap_offset"
+        )
+        self.__fps: int = utils.get_config_value(self.__config, "game.fps")
+
+        # Update control variables.
         self.__frame_counter: int = 0
 
-        self.time_rate: int = 1  # TODO: Remove -> Cleanup.
-        self.__draw_timer: float = 0
+        LOGGER.success("Game instance initialized")
 
-        LOGGER.success("Game initialized")
+    ####################
+    ##   PROPERTIES   ##
+    ####################
+
+    @property
+    def birds(self) -> Sequence[src.objects.bird.Bird]:
+        """Get the birds in the game."""
+
+        return self.__birds.sprites()
+
+    @property
+    def generation(self) -> int | None:
+        """Get the current generation."""
+
+        if self.__is_ai:
+            return self.__ai.generation
+        return None
+
+    @property
+    def ground(self) -> src.objects.ground.Ground:
+        """Get the ground of the game."""
+
+        return self.__ground.sprites().pop()
+
+    @property
+    def is_ai(self) -> bool:
+        """Get whether the AI is active or not."""
+
+        return self.__is_ai
+
+    @property
+    def pipes(self) -> Sequence[src.objects.pipe.Pipe]:
+        """Get the pipes in the game."""
+
+        return self.__pipes.sprites()
+
+    @property
+    def state(self) -> GameStateEnum:
+        """Get the state of the game."""
+
+        return self.__state
+
+    @property
+    def window(self) -> pg.Surface:
+        """Get the game window."""
+
+        return self.__window
 
     ########################
     ##   PUBLIC METHODS   ##
     ########################
 
-    @property
-    def state(self) -> GameStateEnum:
-        return self.__game_state
+    def play(self, random_seed: int | None = None) -> None:
+        """Play the game.
 
-    @state.setter
-    def state(self, state: GameStateEnum) -> None:
-        # TODO: Validate state.
-        self.__game_state = state
+        :param random_seed: Random seed for pipe spawning.
+        """
 
-    @property
-    def birds(self) -> pg.sprite.AbstractGroup:
-        return self.__birds
-
-    @property
-    def obstacles(self) -> pg.sprite.AbstractGroup:
-        return self.__obstacles
-
-    @property
-    def is_ai(self) -> bool:
-        return self.__is_ai
-
-    # noinspection PyTypeChecker
-    def add_bird(self, amount: int = 1) -> None:
-        """Add a bird to the game."""
-
-        for _ in range(amount):
-            bird: src.objects.bird.Bird = src.objects.bird.Bird(
-                position=(
-                    self.__window.get_width() // 5,
-                    self.__window.get_height() // 2,
-                ),
-                config=self.__config,
-                time_rate=self.time_rate,
-            )
-
-            self.__birds.add(bird)
-
-    def play(self, random_seed: int | None = None, draw=True) -> None:
-        """Play the game as human."""
-
-        self.__draw = draw
-
+        # Set random seed if present.
         if random_seed is not None:
             self.__random_generator.seed(random_seed)
 
-        if not self.__is_ai:
-            self.add_bird()
+        if self.__is_ai:
+            self.__state = GameStateEnum.PLAYING
 
-        self.__last_obstacle_spawn_frame = 0
-        self.__frame_counter = 0
-        self.__draw_timer = 0.0
+        # Add birds to the game.
+        self.__add_bird(amount=1 if not self.__is_ai else len(self.__ai))
 
         # Game loop.
-        keep_playing = True
+        keep_playing: bool = True
         while keep_playing:
 
-            if not len(self.__birds):
-                break
+            self.__clock.tick(self.__fps)
 
-            self.__frame_counter += self.time_rate
+            # Listen for game events -> therein human bird controller.
+            keep_playing = self.__handle_game_events()
 
-            # Control game.
-            self.__spawn_obstacle_pair()
-
-            if self.__is_ai:
-                self.__draw_timer -= self.__clock.tick()
-            else:
-                self.__draw_timer -= self.__clock.tick(
-                    self.__config["game"]["update_fps"]
-                )
-
-            if draw and self.__draw_timer <= 0.0:
-                self.__draw_timer += 1_000 / self.__config["game"]["render_fps"]
-                self.__draw_assets()
-
-            # Bird controllers.
-            if self.__is_ai and len(self.__obstacles):
-                self.__to_fly_or_not_to_fly()
+            # Spawn pipes.
+            self.__spawn_pipes()
 
             # Handle collision and scoring if the game is playing.
-            if self.__game_state == GameStateEnum.PLAYING:
+            if self.__state == GameStateEnum.PLAYING:
                 self.__handle_collision()
                 self.__handle_scoring()
 
-            # Handle game events and update the game.
-            keep_playing = self.__handle_game_events()
-            self.__update()
+            # AI bird controller.
+            if self.__is_ai and len(self.__pipes):
+                self.__to_fly_or_not_to_fly()
 
-            # Reward all birds alive if they are alive at this point.
+            # Update the game.
+            if keep_playing:
+                self.__update()
+                self.__illustrator.draw()
+
+            # If there are no birds left the game is over.
+            if not len(self.__birds):
+                keep_playing = False
+
+            # Reward birds for being alive.
             if self.__is_ai:
-                for idx in range(len(self.__birds)):
-                    self.__ai.reward(idx, 0.01)
+                for idx in range(len(self.__ai)):
+                    self.__ai.reward(idx, 0.15)
 
-        # Enforce the game to restart for when the AI is playing.
-        if self.__is_ai and keep_playing:
-            return self.__reset()
-        else:
-            pg.quit()
+            self.__update()
+            self.__frame_counter += 1
+
+        # Quit the game if human is playing or AI is testing.
+        if not self.__is_ai or self.__ai.should_quit():
+            return pg.quit()
+
+        self.__reset()
 
     #########################
     ##   PRIVATE METHODS   ##
     #########################
 
-    def __to_fly_or_not_to_fly(self) -> None:
+    def __add_bird(self, amount: int = 1) -> None:
+        """Add a bird to the game.
 
-        # Pass each bird through its phenotype.
-        for idx, bird in enumerate(self.__birds):
+        :param amount: The amount of birds to add.
+        :raises TypeError: If amount is not an integer.
+        :raises ValueError: If amount is not a positive integer.
+        """
 
-            # Enable the bird to fly.
-            bird.can_fly = True
-            bird.state = BirdStateEnum.FLYING
-
-            # Observe input parameters.
-            top_pipe, btm_pipe = utils.get_next_obstacle_pair_points(
-                bird.rect.center[0], self.__obstacles
-            )
-
-            # Calculate input parameters.
-            delta_y_to_top: float = bird.rect.y - top_pipe.rect.bottomright[1]
-            delta_y_to_btm: float = bird.rect.y - btm_pipe.rect.topright[1]
-            delta_x: float = btm_pipe.rect.topright[0] - bird.rect.x
-
-            if self.__ai.should_fly(
-                genome_id=idx,
-                input_parameters=(delta_x, delta_y_to_top, delta_y_to_btm),
-            ):
-                bird.fly()
-
-    # noinspection PyTypeChecker
-    def __spawn_obstacle_pair(self) -> None:
-        """Spawn a pair of obstacles in the game."""
-
-        # Return if the spawn interval has not been reached or bird not flying.
-        if (
-            self.__frame_counter - self.__last_obstacle_spawn_frame
-            < self.__config["game"]["obstacle_frequency"]
-            or self.__game_state != GameStateEnum.PLAYING
-        ):
-            return
-
-        # Obstacle starting position offset from window edge.
-        off_screen_offset: int = 10
-
-        # Gap between obstacles.
-        obstacle_gap: int = self.__config["game"]["obstacle_gap"] // 2
-
-        # Height offset to randomize heights.
-        height_offset: int = (
-            self.__random_generator.randint(-100, 100) - obstacle_gap
+        LOGGER.operation(
+            f"Adding {amount} {'bird' if amount == 1 else 'birds'}"
         )
 
-        # Create the top_obstacle.
-        top_obstacle: pg.sprite.Sprite = src.objects.obstacles.Pipe(
-            (
-                self.__window.get_width() + off_screen_offset,
-                (self.__window.get_height() // 2)
-                - obstacle_gap
-                + height_offset,
-            ),
-            self.__config,
-            reversed_=True,
-            time_rate=self.time_rate,
-        )
-
-        # Create the bottom_obstacle.
-        bottom_obstacle: pg.sprite.Sprite = src.objects.obstacles.Pipe(
-            (
-                self.__window.get_width() + off_screen_offset,
-                (self.__window.get_height() // 2)
-                + obstacle_gap
-                + height_offset,
-            ),
-            self.__config,
-            reversed_=False,
-            time_rate=self.time_rate,
-        )
-
-        self.__obstacles.add(top_obstacle)
-        self.__obstacles.add(bottom_obstacle)
-
-        # Reset spawn interval timer.
-        self.__last_obstacle_spawn_frame = self.__frame_counter
-
-    def __draw_assets(self) -> None:
-        """Draw the game assets to on the window."""
-
-        # Draw the background.
-        background: pg.Surface = utils.load_asset(
-            self.__config.get("assets")
-            .get("images")
-            .get("background")
-            .get("background_day")
-        )
-        background = pg.transform.scale(
-            surface=background,
-            size=(self.__window.get_width(), self.__window.get_height()),
-        )
-        background_position: Position = (0, 0)
-        self.__window.blit(background, background_position)
-
-        # Draw obstacles.
-        self.__obstacles.draw(self.__window)
-
-        # Draw ground.
-        self.__ground.draw(self.__window)
-
-        # Draw bird.
-        self.__birds.draw(self.__window)
-
-        # Draw intel.
-        self.__intel.draw(self.__window)
-
-        # Draw the main menu if the games hasn't started.
-        if self.__game_state == GameStateEnum.MAIN_MENU:
-            main_menu: pg.Surface = utils.load_asset(
-                self.__config.get("assets")
-                .get("images")
-                .get("menus")
-                .get("main_menu")
+        # Validate amount type.
+        if not isinstance(amount, int):
+            raise TypeError(
+                f"Amount must be of type integer, got '{type(amount)}'"
             )
-            main_menu_position: Position = get_menu_position(
-                self.__window, main_menu
-            )
-            self.__window.blit(main_menu, main_menu_position)
 
-        # Draw the game over screen if the game is over.
-        elif self.__game_state == GameStateEnum.OVER:
-            game_over_menu: pg.Surface = utils.load_asset(
-                self.__config.get("assets")
-                .get("images")
-                .get("menus")
-                .get("game_over")
+        # Validate amount value.
+        if amount <= 0:
+            raise ValueError(
+                f"Amount must be a positive integer, got '{amount:,}'"
             )
-            game_over_menu_position: Position = get_menu_position(
-                self.__window, game_over_menu
-            )
-            self.__window.blit(game_over_menu, game_over_menu_position)
 
-    # noinspection PyTypeChecker
+        # Set initial spawn position.
+        x = self.__window.get_width() // 5
+        y = self.__window.get_height() // 2
+
+        for _ in range(amount):
+            new_bird: src.objects.bird.Bird = src.objects.bird.Bird(
+                position=(x, y), config=self.__config
+            )
+
+            # Ignore type checker, PyGame is not using type hinting correctly.
+            # noinspection PyTypeChecker
+            self.__birds.add(new_bird)
+
+        LOGGER.success("Birds added")
+
     def __handle_collision(self) -> None:
-        """Handle object collision in the game."""
+        """Handle object collision."""
 
         idx: int = 0
         for bird in self.__birds:
 
             # Penalize bird for flying to the top.
-            if (
-                bird.rect.y <= 0
-                and self.__game_state == GameStateEnum.PLAYING
-                and self.__is_ai
-            ):
+            if bird.rect.y <= 0 and self.__is_ai:
                 self.__ai.penalize(idx)
 
             # Check for ground collision.
+            # Ignore type checker, PyGame is not using type hinting correctly.
+            # noinspection PyTypeChecker
             ground_collision: bool = pg.sprite.spritecollide(
-                bird, self.__ground_group, False
+                bird, self.__ground, False
             )
 
             # Check for obstacle collision.
+            # Ignore type checker, PyGame is not using type hinting correctly.
+            # noinspection PyTypeChecker
             obstacle_collision: bool = pg.sprite.spritecollide(
-                bird, self.__obstacles, False
+                bird, self.__pipes, False
             )
 
             # Continue if there is no collision.
@@ -380,61 +295,27 @@ class Game:
 
                 # Remove bird's pheno- and genotype from current generation.
                 self.__ai.remove(idx)
-
-                # Remove the bird from birds in current generation.
-                if len(self.__birds) == 1:
-                    if self.__draw:
-                        self.__draw_assets()
-
-                    LOGGER.info(
-                        f"Best bird in generation with score: "
-                        f"{self.__birds.sprites()[0].score}"
-                    )
                 self.__birds.remove(bird)
 
             # Only applicable for humans, set game state and kill the bird.
             else:
-                self.__game_state = GameStateEnum.OVER
-                self.__birds.sprites()[0].state = BirdStateEnum.DEAD
-
-    def __handle_scoring(self) -> None:
-        """Handle the scoring system."""
-
-        for idx, bird in enumerate(self.__birds):
-
-            # Bird enters score zone.
-            if bird_in_score_zone(bird, self.__obstacles):
-                bird.in_score_zone = True
-
-                # Reward the bird for reaching the score zone.
-                if self.__is_ai:
-                    self.__ai.reward(idx)
-
-            # Bird exits score zone.
-            in_zone: bool = bird_in_score_zone(bird, self.__obstacles)
-            if bird.in_score_zone and not in_zone:
-
-                # Reward the bird for exiting the score zone.
-                if self.__is_ai:
-                    self.__ai.reward(idx)
-
-                # Increment score and mark bird as out of zone.
-                bird.increment_score()
-                bird.in_score_zone = False
+                self.__state = GameStateEnum.OVER
+                bird.state = BirdStateEnum.DEAD
 
     def __handle_game_events(self) -> bool:
-        """Listen for pygame events."""
-
-        keep_playing: bool = True
+        """Handle events through the PyGame event listener."""
 
         for event in pg.event.get():
 
             # Quit if the player closes the Pygame window.
-            if event.type == pg.QUIT:
+            if event.type == pg.QUIT or event.type == pg.WINDOWCLOSE:
+
+                if self.__is_ai:
+                    self.__ai.quit_early()
+
                 return False
 
-            # None of the other events are relevant if the AI is playing.
-            elif self.__is_ai:
+            if self.__is_ai:
                 return True
 
             bird: src.objects.bird.Bird = self.__birds.sprites()[0]
@@ -442,7 +323,7 @@ class Game:
             # Reset bird when DEAD.
             if (
                 bird.state == BirdStateEnum.DEAD
-                and self.__game_state == GameStateEnum.OVER
+                and self.__state == GameStateEnum.OVER
                 and action_key_pressed(event)
             ):
                 self.__reset()
@@ -450,32 +331,94 @@ class Game:
             # Start flying on STANDBY.
             elif (
                 bird.state == BirdStateEnum.STANDBY
-                and self.__game_state == GameStateEnum.MAIN_MENU
+                and self.__state == GameStateEnum.MAIN_MENU
                 and action_key_pressed(event)
             ):
-                self.__game_state = GameStateEnum.PLAYING
+                self.__state = GameStateEnum.PLAYING
                 bird.state = BirdStateEnum.FLYING
-                bird.fly()
+                bird.fly(self.__speedometer.speed)
                 bird.can_fly = False
 
             # Fly if FLYING.
             elif (
                 bird.state == BirdStateEnum.FLYING
-                and self.__game_state == GameStateEnum.PLAYING
+                and self.__state == GameStateEnum.PLAYING
                 and action_key_pressed(event)
             ):
-                bird.fly()
+                bird.fly(self.__speedometer.speed)
                 bird.can_fly = False
 
             # Unlock flying if FLYING.
             elif (
                 bird.state == BirdStateEnum.FLYING
-                and self.__game_state == GameStateEnum.PLAYING
+                and self.__state == GameStateEnum.PLAYING
                 and action_key_released(event)
             ):
                 bird.can_fly = True
 
-        return keep_playing
+        pg.event.clear()
+        return True
+
+    def __handle_scoring(self) -> None:
+        """Handle bird scoring."""
+
+        for idx, bird in enumerate(self.__birds):
+
+            # Bird enters score zone.
+            if bird_in_score_zone(bird, self.__pipes):
+                self.__score_zone.add(idx)
+
+                # Reward the bird for reaching the score zone.
+                if self.__is_ai:
+                    self.__ai.reward(idx)
+
+            # Bird exits score zone.
+            in_zone: bool = bird_in_score_zone(bird, self.__pipes)
+            if idx in self.__score_zone and not in_zone:
+
+                # Reward the bird for exiting the score zone.
+                if self.__is_ai:
+                    self.__ai.reward(idx)
+
+                # Increment score and mark bird as out of zone.
+                bird.increment_score()
+                self.__score_zone.remove(idx)
+
+    def __init__ground(self) -> pg.sprite.Group:
+        """Initialize a Ground instance and add it to a sprite group."""
+
+        ground: src.objects.ground.Ground = src.objects.ground.Ground(
+            self, self.__config
+        )
+        group: pg.sprite.Group = pg.sprite.Group()
+
+        # Ignore type checker, PyGame is not using type hinting correctly.
+        # noinspection PyTypeChecker
+        group.add(ground)
+        return group
+
+    def __init__window(self) -> pg.Surface:
+        """Initialize the game window."""
+
+        # Get dimensions.
+        try:
+            width = utils.get_config_value(self.__config, "game.window_width")
+            height = utils.get_config_value(self.__config, "game.window_height")
+        except MissingConfigurationError:
+            raise
+
+        window: pg.Surface = pg.display.set_mode((width, height))
+
+        # Get game name:
+        try:
+            game_name: str = utils.get_config_value(
+                self.__config, "game.game_name"
+            )
+        except MissingConfigurationError:
+            game_name = "Flappy Bird"
+
+        pg.display.set_caption(game_name)
+        return window
 
     def __reset(self) -> None:
         """Reset the game."""
@@ -488,32 +431,107 @@ class Game:
                 bird.reset()
 
         # Delete all obstacles.
-        self.__obstacles.empty()
+        self.__pipes.empty()
 
         # Set game state to main menu.
-        self.__game_state = GameStateEnum.MAIN_MENU
+        self.__state = GameStateEnum.MAIN_MENU
+
+        # Reset control variables.
+        self.__last_obstacle_spawn_frame = 0
+        self.__frame_counter = 0
+
+    def __spawn_pipes(self) -> None:
+        """Spawn a pair of pipes into the game."""
+
+        # No pipe spawning if the game is not playing.
+        if self.__state != GameStateEnum.PLAYING:
+            return
+
+        # No pipe spawning if spawn interval has not been reached.
+        elif self.__frame_counter - self.__last_obstacle_spawn_frame < (
+            self.__spawn_frequency // self.__speedometer.speed
+        ):
+            return
+
+        # Randomize gap heights.
+        height_offset: int = self.__random_generator.randint(
+            -self.__gap_offset, self.__gap_offset
+        )
+
+        # Create the top pipe.
+        top_pipe: src.objects.pipe.Pipe = src.objects.pipe.Pipe(
+            position=(
+                self.__window.get_width() + self.__off_screen_spawn_offset,
+                (self.__window.get_height() // 2)
+                - self.__obstacle_gap // 2
+                + height_offset,
+            ),
+            config=self.__config,
+            reversed=True,
+        )
+
+        # Create the top pipe.
+        btm_pipe: src.objects.pipe.Pipe = src.objects.pipe.Pipe(
+            position=(
+                self.__window.get_width() + self.__off_screen_spawn_offset,
+                (self.__window.get_height() // 2)
+                + self.__obstacle_gap
+                + height_offset,
+            ),
+            config=self.__config,
+            reversed=False,
+        )
+
+        # Ignore type checker, PyGame is not using type hinting correctly.
+        # noinspection PyTypeChecker
+        self.__pipes.add(top_pipe)
+        # noinspection PyTypeChecker
+        self.__pipes.add(btm_pipe)
+
+        # Reset spawn interval timer.
+        self.__last_obstacle_spawn_frame = self.__frame_counter
+
+    def __to_fly_or_not_to_fly(self) -> None:
+        """For each bird, determine whether it should fly and if so; do so."""
+
+        # Pass each bird through its phenotype.
+        for idx, bird in enumerate(self.__birds):
+
+            # Enable the bird to fly.
+            bird.can_fly = True
+            bird.state = BirdStateEnum.FLYING
+
+            # Observe input parameters.
+            top_pipe, btm_pipe = utils.get_next_pipe_pair(
+                bird.rect.x, self.__pipes
+            )
+
+            # Calculate input parameters.
+            delta_y_to_top: float = bird.rect.y - top_pipe.rect.bottomright[1]
+            delta_y_to_btm: float = bird.rect.y - btm_pipe.rect.topright[1]
+            delta_x: float = btm_pipe.rect.topright[0] - bird.rect.x
+
+            if self.__ai.should_fly(
+                genome_id=idx,
+                input_parameters=(delta_x, delta_y_to_top, delta_y_to_btm),
+            ):
+                bird.fly(self.__speedometer.speed)
 
     def __update(self) -> None:
         """Update the game."""
 
         # Update the obstacles if the birds are flying.
-        if self.__game_state == GameStateEnum.PLAYING:
-            self.__obstacles.update()
+        if self.__state == GameStateEnum.PLAYING:
+            self.__pipes.update(self.__speedometer.speed)
 
         # Update the ground whilst the game is not over.
-        if self.__game_state != GameStateEnum.OVER:
-            self.__ground.update()
+        if self.__state != GameStateEnum.OVER:
+            self.__ground.update(self.__speedometer.speed)
 
         # Update the birds.
-        self.__birds.update()
-
-        # Update intel.
-        self.__intel.update(
-            None if not len(self.__birds) else self.__birds.sprites()[0].score
-        )
+        self.__birds.update(self.__speedometer.speed)
 
         # Update the game window.
-        pg.display.update()
         pg.display.flip()
 
 
@@ -551,12 +569,12 @@ def action_key_released(event: pg.event.Event) -> bool:
 
 
 def bird_in_score_zone(
-    bird: src.objects.bird.Bird, obstacles: pg.sprite.AbstractGroup
+    bird: src.objects.bird.Bird, pipes: pg.sprite.Group
 ) -> bool:
     """Check if the bird is flying through the gap between obstacles.
 
     :param bird: A Bird instance.
-    :param obstacles: The group of active obstacles within the game.
+    :param pipes: The group of active pipes within the game.
     :raises TypeError: If provided arguments are of unsupported type.
     """
 
@@ -564,27 +582,18 @@ def bird_in_score_zone(
     if not isinstance(bird, src.objects.bird.Bird):
         raise TypeError(f"Unsupported type {type(bird)} for argument 'bird'")
 
-    # Validate obstacles argument.
-    elif not isinstance(obstacles, pg.sprite.AbstractGroup):
+    # Validate pipes argument.
+    elif not isinstance(pipes, pg.sprite.Group):
         raise TypeError(
-            f"Unsupported type {type(obstacles)} for argument 'obstacles'"
+            f"Unsupported type {type(pipes)} for argument 'obstacles'"
         )
 
     # If there are no obstacles present.
-    if not len(obstacles):
+    if not len(pipes):
         return False
 
     # Return the check result.
     return (
-        bird.rect.right > obstacles.sprites()[0].rect.left
-        and bird.rect.left < obstacles.sprites()[0].rect.right
-    )
-
-
-def get_menu_position(window: pg.Surface, menu: pg.Surface) -> Position:
-    """Get a position for a menu sprite."""
-
-    return (
-        (window.get_width() - menu.get_width()) // 2,
-        (window.get_height() - menu.get_height()) // 3,
+        bird.rect.right > pipes.sprites()[0].rect.left
+        and bird.rect.left < pipes.sprites()[0].rect.right
     )
